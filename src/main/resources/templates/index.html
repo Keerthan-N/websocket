@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Database Updates</title>
+    <!-- Include SockJS and STOMP libraries via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs/lib/stomp.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 30px;
+            background-color: #f4f7f6;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        h2 {
+            color: #2c3e50;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        li {
+            background: #eef2f3;
+            margin-bottom: 8px;
+            padding: 12px;
+            border-left: 5px solid #3498db;
+            border-radius: 4px;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>DB Live Update Dashboard</h2>
+
+    <!-- Connection Status Indicator -->
+    <div id="status" class="status disconnected">Status: Connecting...</div>
+
+    <h3>Recent Database Changes</h3>
+    <ul id="updates-list">
+        <!-- New notifications will append here dynamically -->
+    </ul>
+</div>
+
+<table id="users" border="1">
+    <thead>
+    <tr><th>ID</th><th>Created At</th><th>Description</th><th>Filter Name</th><th>Module Name</th><th>User Id</th></tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
+<script>
+
+    async function loadUsers() {
+      const tbody = document.querySelector("#users tbody");
+      try {
+        const res = await fetch("http://localhost:8080/userhistory/getAllUserHistory");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const users = await res.json();
+
+        tbody.innerHTML = users.map(u => `
+          <tr>
+            <td>${u.id}</td>
+            <td>${u.createdAt ? new Date(u.createdAt).toLocaleString() : ""}</td>
+            <td>${u.description ?? ""}</td>
+            <td>${u.filterName ?? ""}</td>
+            <td>${u.moduleName ?? ""}</td>
+            <td>${u.userId ?? ""}</td>
+          </tr>`).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6">Failed to load data: ${err.message}</td></tr>`;
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", loadUsers);
+
+   // Elements from DOM
+   const statusDiv = document.getElementById('status');
+   const updatesList = document.getElementById('updates-list');
+
+   // 1. Connect to the exposed Spring Boot WebSocket endpoint
+   const socket = new SockJS('http://localhost:8080/ws-connect');
+   const stompClient = Stomp.over(socket);
+
+   // Optional: Turn off excessive internal debug logs in browser console
+   // stompClient.debug = null;
+
+   stompClient.connect({}, function (frame) {
+       console.log('Connected to WebSocket server:', frame);
+
+       // Update UI Status to Connected
+       statusDiv.textContent = "Status: Connected to Database Stream";
+       statusDiv.className = "status connected";
+
+       // 2. Subscribe to the database updates topic
+       stompClient.subscribe('/topic/updates', function (notification) {
+           const messageBody = JSON.parse(notification.body);
+           console.log("Database update detected:", messageBody);
+
+           // 3. Update your UI layout dynamically
+           renderNewUpdate(messageBody);
+       });
+   }, function (error) {
+       // Fallback context handler if the connection fails or drops
+       console.error('WebSocket connection error:', error);
+       statusDiv.textContent = "Status: Connection Failed / Disconnected";
+       statusDiv.className = "status disconnected";
+   });
+
+   // Helper function to insert updates into the DOM list element
+   function renderNewUpdate(data) {
+       const listItem = document.createElement('li');
+
+       // Format timestamp for context
+       const timestamp = new Date().toLocaleTimeString();
+
+       // Set context inner text mapping structural data properties sent from your Java back-end
+       listItem.innerHTML = `<strong>[${timestamp}]</strong> Entity: <b>${data.entity}</b> was modified via action: <span style="color:#e74c3c; font-weight:bold;">${data.action}</span>`;
+
+       // Prepend so newest updates sit at the top
+       updatesList.insertBefore(listItem, updatesList.firstChild);
+   }
+</script>
+</body>
+</html>
